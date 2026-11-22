@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ログピン ログイン</title>
+<style>
+  body { font-family: sans-serif; background:#fff; color:#111; margin:0; padding:40px 20px; text-align:center; }
+  h1 { font-size:20px; margin-bottom:8px; }
+  p { color:#555; font-size:14px; line-height:1.7; }
+  button { background:#111; color:#fff; border:0; border-radius:999px; padding:14px 28px; font-size:16px; cursor:pointer; }
+  .code { font-size:44px; font-weight:bold; letter-spacing:10px; margin:20px 0 4px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+  <h1>ログピン ログイン</h1>
+  <div id="step-login">
+    <p>Googleでログインすると、アプリに入力するための<br>6桁のコードが表示されます。</p>
+    <button id="btn">Googleでログイン</button>
+  </div>
+  <div id="step-code" class="hidden">
+    <p>ログインできました。<br>アプリに戻って、このコードを入力してください。</p>
+    <div class="code" id="code">------</div>
+    <p>コードは10分間有効です。</p>
+  </div>
+  <div id="step-error" class="hidden">
+    <p>うまくいきませんでした。もう一度お試しください。</p>
+    <button onclick="location.href=location.pathname">最初からやり直す</button>
+  </div>
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+const FUNCTION_URL = "https://qsogdmbornmkkxxknwnt.supabase.co/functions/v1/auth-callback";
+const sb = createClient("https://qsogdmbornmkkxxknwnt.supabase.co", "sb_publishable_Rt0Tu9YOzIH_UGtw28qAIw_eo8WTDh_");
+const show = (id) => {
+  for (const s of ["step-login", "step-code", "step-error"]) {
+    document.getElementById(s).classList.toggle("hidden", s !== id);
+  }
+};
+document.getElementById("btn").addEventListener("click", async () => {
+  await sb.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: location.origin + location.pathname },
+  });
+});
+const params = new URLSearchParams(location.search);
+const code = params.get("code");
+if (code) {
+  const { data, error } = await sb.auth.exchangeCodeForSession(code);
+  if (error || !data.session) {
+    show("step-error");
+  } else {
+    const res = await fetch(FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      }),
+    });
+    const json = await res.json();
+    if (json.code) {
+      document.getElementById("code").textContent = json.code;
+      show("step-code");
+    } else {
+      show("step-error");
+    }
+  }
+}
+</script>
+</body>
+</html>
