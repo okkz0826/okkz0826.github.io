@@ -11,6 +11,7 @@
   button { background:#111; color:#fff; border:0; border-radius:999px; padding:14px 28px; font-size:16px; cursor:pointer; }
   .code { font-size:44px; font-weight:bold; letter-spacing:10px; margin:20px 0 4px; }
   .hidden { display:none; }
+  .detail { font-size:11px; color:#999; word-break:break-all; margin-top:16px; text-align:left; }
 </style>
 </head>
 <body>
@@ -27,35 +28,38 @@
   <div id="step-error" class="hidden">
     <p>うまくいきませんでした。もう一度お試しください。</p>
     <button onclick="location.href=location.pathname">最初からやり直す</button>
+    <p class="detail" id="detail"></p>
   </div>
 <script type="module">
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const FUNCTION_URL = "https://qsogdmbornmkkxxknwnt.supabase.co/functions/v1/auth-callback";
 const sb = createClient("https://qsogdmbornmkkxxknwnt.supabase.co", "sb_publishable_Rt0Tu9YOzIH_UGtw28qAIw_eo8WTDh_");
-const show = (id) => {
+const show = (id, detail) => {
   for (const s of ["step-login", "step-code", "step-error"]) {
     document.getElementById(s).classList.toggle("hidden", s !== id);
   }
+  if (id === "step-error" && detail) {
+    document.getElementById("detail").textContent = detail;
+  }
 };
 document.getElementById("btn").addEventListener("click", async () => {
-  await sb.auth.signInWithOAuth({
+  const { error } = await sb.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo: location.origin + location.pathname },
   });
+  if (error) show("step-error", "start: " + error.message);
 });
-const params = new URLSearchParams(location.search);
-const code = params.get("code");
-if (code) {
-  const { data, error } = await sb.auth.exchangeCodeForSession(code);
-  if (error || !data.session) {
-    show("step-error");
-  } else {
+let handled = false;
+const handleSession = async (session) => {
+  if (handled || !session) return;
+  handled = true;
+  try {
     const res = await fetch(FUNCTION_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
       }),
     });
     const json = await res.json();
@@ -63,8 +67,30 @@ if (code) {
       document.getElementById("code").textContent = json.code;
       show("step-code");
     } else {
-      show("step-error");
+      show("step-error", "store: " + JSON.stringify(json));
     }
+  } catch (e) {
+    show("step-error", "exception: " + (e && e.message ? e.message : String(e)));
+  }
+};
+const params = new URLSearchParams(location.search);
+const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+const errText = params.get("error_description") || params.get("error") || hashParams.get("error_description") || hashParams.get("error");
+if (errText) {
+  show("step-error", "returned: " + errText);
+}
+sb.auth.onAuthStateChange((_event, session) => {
+  if (session) handleSession(session);
+});
+const { data } = await sb.auth.getSession();
+if (data.session) {
+  handleSession(data.session);
+} else if (params.get("code")) {
+  const { data: exData, error: exError } = await sb.auth.exchangeCodeForSession(params.get("code"));
+  if (exError) {
+    show("step-error", "exchange: " + exError.message);
+  } else if (exData.session) {
+    handleSession(exData.session);
   }
 }
 </script>
